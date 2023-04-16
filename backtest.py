@@ -3,9 +3,63 @@ from __future__ import (absolute_import, division, print_function,
 
 import datetime  # For datetime objects
 import backtrader as bt # Import the backtrader platfor
+from config import *
 
 
+# Create a indicators
+class IndBreakout(bt.Indicator): 
+    # Breakout indicator now it is calculate by standard deviation 
+    # and range.
+    lines = ('flurange','longTrade','shortTrade' ) # 最后一个 “,” 别省略
+    params = (('period',90),('stdcof',90),) # 最后一个 “,” 别省略
+    
+    def __init__(self):
+        '''可选'''
+        print("use Breakout indicator,period is ",self.p.period)
+        self.addminperiod(self.params.period) # Discard the time less than period
+        the_highest_high_period = bt.ind.Highest(self.data.high, period=self.params.period)
+        the_highest_low_period  = bt.ind.Lowest(self.data.low, period=self.params.period)
+        the_standard_deviation_period = bt.ind.Lowest(self.data, period=self.params.period)
+        self.l.flurange = the_highest_high_period - the_highest_low_period
+        self.longTrade = the_highest_high_period + self.p.stdcof * the_standard_deviation_period
+        self.shortTrade = the_highest_low_period - self.p.stdcof * the_standard_deviation_period
+        pass
+    
+    def next(self):
+        pass
+    
+    def once(self):
+        pass 
+    
 # Create a Stratey
+class BTCBreakoutStrategy(bt.Strategy):
+
+    params = (
+        ('maperiod', None),
+        ('stdcoef', None) #a1
+    )
+
+
+    def __init__(self):
+        # Keep a reference to the "close" line in the data[0] dataseries
+        self.dataclose = self.datas[0].close
+        # To keep track of pending orders and buy price/commission
+        self.order = None
+        self.buyprice = None
+        self.buycomm = None
+        self.amount = None
+
+        # Add a MovingAverageSimple indicator
+        self.sma = bt.indicators.SimpleMovingAverage(self.datas[0], period=self.params.maperiod)
+
+
+    def notify_order(self, order):
+        pass
+
+    def next(self):
+        self.nowcrash = self.broker.getcash()
+        pass
+
 class SMAStrategy(bt.Strategy):
 
     params = (
@@ -64,8 +118,6 @@ class SMAStrategy(bt.Strategy):
 
                 # Keep track of the created order to avoid a 2nd order
                 self.order = self.sell(size=self.amount)
-
-
 
 class RSIStrategy(bt.Strategy):
 
@@ -199,7 +251,7 @@ def getSQN(analyzer):
 
 
 
-def runbacktest(datapath, start, end, period, strategy, commission_val=None, portofolio=10000.0, stake_val=1, quantity=0.01, plt=False):
+def runbacktest(datapath, start, end, period, strategy, commission_val=None, portofolio=10000.0, stake_val=1, stdcoef=0.5, plt=False):
 
     # Create a cerebro entity
     cerebro = bt.Cerebro()
@@ -212,13 +264,11 @@ def runbacktest(datapath, start, end, period, strategy, commission_val=None, por
     if commission_val:
         cerebro.broker.setcommission(commission=commission_val/100) # divide by 100 to remove the %
 
+    cerebro.broker.set_slippage_perc(perc=0.00005)
+
     # Add a strategy
-    if strategy == 'SMA':
-        cerebro.addstrategy(SMAStrategy, maperiod=period, quantity=quantity)
-    elif strategy == 'RSI':
-        cerebro.addstrategy(RSIStrategy, maperiod=period, quantity=quantity)
-    elif strategy == 'BTCTUPO':
-        cerebro.addstrategy(RSIStrategy, maperiod=period, quantity=quantity)
+    if strategy == stList['btgh']:
+        cerebro.addstrategy(BTCBreakoutStrategy, maperiod=period, stdcoef=stdcoef)
     else :
         print('no strategy')
         exit()
