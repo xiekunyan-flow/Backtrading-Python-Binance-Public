@@ -10,33 +10,35 @@ from config import *
 class IndBreakout(bt.Indicator): 
     # Breakout indicator now it is calculate by standard deviation 
     # and range.
-    lines = ('flurange','longTrade','shortTrade' ) # 最后一个 “,” 别省略
-    params = (('period',90),('stdcof',90),) # 最后一个 “,” 别省略
+    lines = ('flurange','longTrade','shortTrade', ) # 最后一个 “,” 别省略
+    params = (('period',90),('stdcoef',90),) # 最后一个 “,” 别省略
     
     def __init__(self):
         '''可选'''
         print("use Breakout indicator,period is ",self.p.period)
         self.addminperiod(self.params.period) # Discard the time less than period
-        the_highest_high_period = bt.ind.Highest(self.data.high, period=self.params.period)
-        the_highest_low_period  = bt.ind.Lowest(self.data.low, period=self.params.period)
-        the_standard_deviation_period = bt.ind.Lowest(self.data, period=self.params.period)
-        self.l.flurange = the_highest_high_period - the_highest_low_period
-        self.longTrade = the_highest_high_period + self.p.stdcof * the_standard_deviation_period
-        self.shortTrade = the_highest_low_period - self.p.stdcof * the_standard_deviation_period
+        the_highest_period = bt.ind.Highest(self.data.high, period=self.params.period)
+        the_lowest_period  = bt.ind.Lowest(self.data.low, period=self.params.period)
+        the_standard_deviation_period = bt.ind.StandardDeviation(self.data, period=self.params.period)
+        self.l.flurange = the_highest_period - the_lowest_period
+        self.l.longTrade = the_highest_period + self.p.stdcoef * the_standard_deviation_period
+        self.l.shortTrade = the_lowest_period - self.p.stdcoef * the_standard_deviation_period
+        # self.plotinfo = dict(subplot=False, plotname='My Indicator', plot=True,
+        #             color='blue', linestyle='dashed', linewidth=2)
         pass
     
     def next(self):
         pass
     
-    def once(self):
-        pass 
     
 # Create a Stratey
 class BTCBreakoutStrategy(bt.Strategy):
 
     params = (
         ('maperiod', None),
-        ('stdcoef', None) #a1
+        ('stdcoef', None), #a1
+        ('inquantity', None), #a2
+        # ('outquantity', None), #a2
     )
 
 
@@ -48,17 +50,57 @@ class BTCBreakoutStrategy(bt.Strategy):
         self.buyprice = None
         self.buycomm = None
         self.amount = None
+        self.direction = None
 
         # Add a MovingAverageSimple indicator
-        self.sma = bt.indicators.SimpleMovingAverage(self.datas[0], period=self.params.maperiod)
+        self.ind = IndBreakout(self.datas[0], period=self.params.maperiod,stdcoef=self.params.stdcoef)
 
 
     def notify_order(self, order):
-        pass
+        if order.status in [order.Submitted, order.Accepted]:
+            # Buy/Sell order submitted/accepted to/by broker - Nothing to do
+            return
+
+        # Check if an order has been completed
+        # Attention: broker could reject order if not enough cash
+        if order.status in [order.Completed]:
+            if order.isbuy():
+                self.buyprice = order.executed.price
+                self.buycomm = order.executed.comm
+
+        self.order = None
 
     def next(self):
-        self.nowcrash = self.broker.getcash()
-        pass
+
+        # Check if an order is pending ... if yes, we cannot send a 2nd one
+        if self.order:
+            return
+
+        # Check if we are in the market
+        if not self.position:
+
+            # Not yet ... we MIGHT BUY if ...
+            if self.dataclose[0] > self.ind.l.longTrade :
+                self.amount = (self.broker.getvalue() * self.param.inquantity / self.ind.l.flurange) / self.dataclose[0]
+                self.order = self.buy(size=self.amount)
+                self.direction = "L"  
+
+            elif self.dataclose[0] < self.ind.l.shortTrade:
+
+                # Keep track of the created order to avoid a 2nd order
+                self.amount = (self.broker.getvalue() * self.param.inquantity / self.ind.l.flurange) / self.dataclose[0]
+                self.order = self.sell(size=self.amount)
+                self.direction = "S"
+        else:
+            # Already in the market ... we might sell
+            if self.direction == "S" and self.dataclose[0] > self.ind.l.longTrade :
+                self.order = self.buy(size=self.amount)  
+                self.direction = None
+
+            elif self.direction == "L" and self.dataclose[0] < self.ind.l.shortTrade:
+
+                self.order = self.sell(size=self.amount)
+                self.direction = None
 
 class SMAStrategy(bt.Strategy):
 
@@ -79,7 +121,7 @@ class SMAStrategy(bt.Strategy):
         self.amount = None
 
         # Add a MovingAverageSimple indicator
-        self.sma = bt.indicators.SimpleMovingAverage(self.datas[0], period=self.params.maperiod)
+        self.sma = bt.ind.SimpleMovingAverage(self.datas[0], period=self.params.maperiod)
 
 
     def notify_order(self, order):
@@ -251,7 +293,9 @@ def getSQN(analyzer):
 
 
 
-def runbacktest(datapath, start, end, period, strategy, commission_val=None, portofolio=10000.0, stake_val=1, stdcoef=0.5, plt=False):
+def runbacktest(datapath, start, end, strategy,
+                period,stdcoef=0.5,inquantity = 1.0,outquantity = 1.0,
+                commission_val=None, portofolio=10000.0, stake_val=1, plt=False):
 
     # Create a cerebro entity
     cerebro = bt.Cerebro()
