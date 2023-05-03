@@ -57,6 +57,7 @@ class BTCBreakoutStrategy(bt.Strategy):
 
 
     def notify_order(self, order):
+        # print("order",order)
         if order.status in [order.Submitted, order.Accepted]:
             # Buy/Sell order submitted/accepted to/by broker - Nothing to do
             return
@@ -80,25 +81,30 @@ class BTCBreakoutStrategy(bt.Strategy):
         if not self.position:
 
             # Not yet ... we MIGHT BUY if ...
-            if self.dataclose[0] > self.ind.l.longTrade :
-                self.amount = (self.broker.getvalue() * self.param.inquantity / self.ind.l.flurange) / self.dataclose[0]
+            ratio = min(1.0,self.params.inquantity * (1.0 /max(1.0,self.ind.l.flurange[0])))
+            # print(self.dataclose[0],self.ind.l.longTrade[0]-self.dataclose[0],self.dataclose[0]-self.ind.l.shortTrade[0])
+            # if self.dataclose[0] > self.ind.l.longTrade[-1] or self.dataclose[0] < self.ind.l.shortTrade[-1]:
+            #     print(self.datas[0].lines[6][0],self.dataclose[0])
+            if self.dataclose[0] > self.ind.l.longTrade[-1] :
+                self.amount = self.broker.getvalue() * ratio
                 self.order = self.buy(size=self.amount)
                 self.direction = "L"  
 
-            elif self.dataclose[0] < self.ind.l.shortTrade:
+            elif self.dataclose[0] < self.ind.l.shortTrade[-1]:
 
                 # Keep track of the created order to avoid a 2nd order
-                self.amount = (self.broker.getvalue() * self.param.inquantity / self.ind.l.flurange) / self.dataclose[0]
+                self.amount = self.broker.getvalue() * ratio
                 self.order = self.sell(size=self.amount)
                 self.direction = "S"
         else:
             # Already in the market ... we might sell
-            if self.direction == "S" and self.dataclose[0] > self.ind.l.longTrade :
+            # if self.dataclose[0] > self.ind.l.longTrade[-1] or self.dataclose[0] < self.ind.l.shortTrade[-1]:
+            #     print(self.datas[0].lines[6][0],self.dataclose[0],self.amount)
+            if self.direction == "S" and self.dataclose[0] > self.ind.l.longTrade[-1] :
                 self.order = self.buy(size=self.amount)  
                 self.direction = None
 
-            elif self.direction == "L" and self.dataclose[0] < self.ind.l.shortTrade:
-
+            elif self.direction == "L" and self.dataclose[0] < self.ind.l.shortTrade[-1]:
                 self.order = self.sell(size=self.amount)
                 self.direction = None
 
@@ -295,7 +301,7 @@ def getSQN(analyzer):
 
 def runbacktest(datapath, start, end, strategy,
                 period,stdcoef=0.5,inquantity = 1.0,outquantity = 1.0,
-                commission_val=None, portofolio=10000.0, stake_val=1, plt=False):
+                commission_val=None, leverage =20.0, portofolio=10000.0, stake_val=1, plt=False):
 
     # Create a cerebro entity
     cerebro = bt.Cerebro()
@@ -305,14 +311,18 @@ def runbacktest(datapath, start, end, strategy,
 
     cerebro.broker.setcash(portofolio) # default : 10000.0
 
-    if commission_val:
-        cerebro.broker.setcommission(commission=commission_val/100) # divide by 100 to remove the %
+    if commission_val :
+        cerebro.broker.setcommission(
+            commission=commission_val/100,
+            leverage=leverage) # divide by 100 to remove the %
+
 
     cerebro.broker.set_slippage_perc(perc=0.00005)
 
     # Add a strategy
     if strategy == stList['btgh']:
-        cerebro.addstrategy(BTCBreakoutStrategy, maperiod=period, stdcoef=stdcoef)
+        print("called BTCBreakoutStrategy",period,stdcoef,inquantity)
+        cerebro.addstrategy(BTCBreakoutStrategy, maperiod=period, stdcoef=stdcoef, inquantity=inquantity)
     else :
         print('no strategy')
         exit()
